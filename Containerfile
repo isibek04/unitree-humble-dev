@@ -28,7 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         > /etc/apt/sources.list.d/llvm.list \
     && apt-get update && apt-get install -y --no-install-recommends \
         llvm-$LLVM_VERSION-dev clang-$LLVM_VERSION libclang-$LLVM_VERSION-dev libclang-cpp$LLVM_VERSION-dev \
-        libclc-$LLVM_VERSION-dev cmake ninja-build \
+        libclc-$LLVM_VERSION-dev libpolly-$LLVM_VERSION-dev cmake ninja-build \
         libdrm-dev libexpat1-dev libzstd-dev zlib1g-dev libelf-dev \
         libx11-dev libxext-dev libxfixes-dev libxrandr-dev libxshmfence-dev libx11-xcb-dev \
         libxcb-dri3-dev libxcb-present-dev libxcb-sync-dev libxcb-randr0-dev \
@@ -66,7 +66,7 @@ ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkg
     LIBCLANG_PATH=/usr/lib/llvm-$LLVM_VERSION/lib \
     PATH=/usr/lib/llvm-$LLVM_VERSION/bin:/root/.cargo/bin:$PATH
 RUN pip3 install --no-cache-dir meson ninja mako pyyaml packaging \
-    && curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal \
+    && curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal -c rustfmt \
     && cargo install --locked bindgen-cli cbindgen
 
 RUN curl -fsSL https://archive.mesa3d.org/mesa-$MESA_VERSION.tar.xz | tar -xJ -C /opt \
