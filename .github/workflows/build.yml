@@ -14,8 +14,8 @@ on:
       - .github/workflows/build.yml
   pull_request:
     paths: *image-paths
-  # Nightly rebuild without cache, so the image picks up Ubuntu/ROS security
-  # updates and new commits in the Unitree repos (cloned at build time).
+  # Nightly rebuild of the runtime stage without cache, so the image picks up
+  # Ubuntu/ROS security updates and new commits in the Unitree repos.
   schedule:
     - cron: "0 3 * * *"
   workflow_dispatch:
@@ -74,6 +74,9 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           pull: true
-          no-cache: ${{ github.event_name == 'schedule' || inputs.no-cache == true }}
+          # Nightly refreshes only the final stage; the Mesa build (pinned by
+          # MESA_VERSION) stays cached so it isn't recompiled every night.
+          no-cache: ${{ inputs.no-cache == true }}
+          no-cache-filters: ${{ github.event_name == 'schedule' && 'runtime' || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
