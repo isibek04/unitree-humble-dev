@@ -76,7 +76,7 @@ RUN curl -fsSL https://archive.mesa3d.org/mesa-$MESA_VERSION.tar.xz | tar -xJ -C
         -Dvulkan-layers=device-select \
         -Dgallium-drivers= -Dopengl=false -Dgles1=disabled -Dgles2=disabled \
         -Degl=disabled -Dgbm=disabled -Dglx=disabled -Dllvm=enabled -Dshared-llvm=disabled \
-        -Dplatforms=x11,wayland -Dlmsensors=disabled -Dvalgrind=disabled -Dlibunwind=disabled \
+        -Dplatforms=x11,wayland -Dallow-fallback-for=libdrm -Dlmsensors=disabled -Dvalgrind=disabled -Dlibunwind=disabled \
     && meson install -C build --destdir /staging
 
 # ---------------------------------------------------------------------------
