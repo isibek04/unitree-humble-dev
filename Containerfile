@@ -81,6 +81,22 @@ RUN curl -fsSL https://archive.mesa3d.org/mesa-$MESA_VERSION.tar.xz | tar -xJ -C
         -Dplatforms=x11,wayland -Dallow-fallback-for=libdrm -Dlmsensors=disabled -Dvalgrind=disabled -Dlibunwind=disabled \
     && meson install -C build --destdir /staging
 
+# Jammy's Vulkan loader (1.3.204) predates VK_EXT_layer_settings, which Mesa's
+# layers advertise, so vulkaninfo fails on it; ship a current loader + vulkaninfo.
+ARG VULKAN_SDK_REF=vulkan-sdk-1.4.363.0
+RUN git clone --depth 1 --branch "$VULKAN_SDK_REF" https://github.com/KhronosGroup/Vulkan-Loader /opt/vulkan-loader \
+    && git clone --depth 1 --branch "$VULKAN_SDK_REF" https://github.com/KhronosGroup/Vulkan-Tools /opt/vulkan-tools \
+    && cmake -S /opt/vulkan-loader -B /opt/vulkan-loader/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+        -DUPDATE_DEPS=ON -DBUILD_TESTS=OFF -DCMAKE_INSTALL_PREFIX=/usr/local \
+    && cmake --build /opt/vulkan-loader/build \
+    && DESTDIR=/staging cmake --install /opt/vulkan-loader/build \
+    && cmake -S /opt/vulkan-tools -B /opt/vulkan-tools/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+        -DUPDATE_DEPS=ON -DBUILD_CUBE=OFF -DBUILD_ICD=OFF -DBUILD_VULKANINFO=ON -DBUILD_TESTS=OFF \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+    && cmake --build /opt/vulkan-tools/build \
+    && DESTDIR=/staging cmake --install /opt/vulkan-tools/build \
+    && rm -rf /opt/vulkan-loader /opt/vulkan-tools
+
 # ---------------------------------------------------------------------------
 # Final image
 # ---------------------------------------------------------------------------
@@ -97,7 +113,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-humble-rmw-cyclonedds-cpp \
         ros-humble-rosidl-generator-dds-idl \
         libyaml-cpp-dev \
-        libvulkan1 vulkan-tools \
         libdrm2 libdrm-amdgpu1 libdrm-intel1 libdrm-nouveau2 libxcb-dri3-0 libxcb-present0 \
         libxcb-sync1 libxcb-randr0 libxcb-xfixes0 libxshmfence1 libx11-xcb1 libwayland-client0 libzstd1 libelf1 \
         libgl1 libglib2.0-0 libsm6 libxrender1 libxext6 libgles2-mesa libegl1 \
