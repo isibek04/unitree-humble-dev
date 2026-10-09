@@ -28,7 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         > /etc/apt/sources.list.d/llvm.list \
     && apt-get update && apt-get install -y --no-install-recommends \
         llvm-$LLVM_VERSION-dev clang-$LLVM_VERSION libclang-$LLVM_VERSION-dev libclang-cpp$LLVM_VERSION-dev \
-        libclc-$LLVM_VERSION-dev cmake ninja-build glslang-tools \
+        libclc-$LLVM_VERSION-dev cmake ninja-build \
         libdrm-dev libexpat1-dev libzstd-dev zlib1g-dev libelf-dev \
         libx11-dev libxext-dev libxfixes-dev libxrandr-dev libxshmfence-dev libx11-xcb-dev \
         libxcb-dri3-dev libxcb-present-dev libxcb-sync-dev libxcb-randr0-dev \
@@ -52,6 +52,14 @@ RUN git clone --depth 1 --branch "$SPIRV_REF" https://github.com/KhronosGroup/SP
         -DLLVM_SPIRV_INCLUDE_TESTS=OFF -DCMAKE_INSTALL_PREFIX=/usr/local \
     && cmake --build /opt/spirv-llvm-translator/build --target install \
     && rm -rf /opt/spirv-tools /opt/spirv-headers /opt/spirv-llvm-translator
+
+# Mesa also wants glslang >= 12.2 (jammy has 11.x).
+RUN git clone --depth 1 https://github.com/KhronosGroup/glslang /opt/glslang \
+    && cd /opt/glslang && python3 update_glslang_sources.py \
+    && cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DENABLE_GLSLANG_BINARIES=ON -DBUILD_TESTING=OFF \
+    && cmake --build build --target install \
+    && rm -rf /opt/glslang
 
 # Mesa needs meson >= 1.4, rustc >= 1.85 and bindgen >= 0.71.1 for NVK; jammy ships none of them.
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig \
