@@ -69,9 +69,11 @@ RUN pip3 install --no-cache-dir meson ninja mako pyyaml packaging \
     && curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal -c rustfmt \
     && cargo install --locked bindgen-cli cbindgen
 
+# Build with clang: Mesa uses C23 enums with a fixed underlying type
+# (`enum x : uint8_t`), which jammy's GCC 11 can't parse.
 RUN curl -fsSL https://archive.mesa3d.org/mesa-$MESA_VERSION.tar.xz | tar -xJ -C /opt \
     && cd /opt/mesa-$MESA_VERSION \
-    && meson setup build --prefix=/usr/local --buildtype=release \
+    && CC=clang-$LLVM_VERSION CXX=clang++-$LLVM_VERSION meson setup build --prefix=/usr/local --buildtype=release \
         -Dvulkan-drivers=amd,intel,intel_hasvk,nouveau,swrast \
         -Dvulkan-layers=device-select \
         -Dgallium-drivers= -Dopengl=false -Dgles1=disabled -Dgles2=disabled \
