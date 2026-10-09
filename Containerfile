@@ -3,6 +3,7 @@
 #   - Unitree ROS2 message packages (unitree_api, unitree_go, unitree_hg)
 #   - Unitree Python SDK (unitree_sdk2py, cyclonedds 0.10.2)
 #   - Inference only (no torch): ncnn (Vulkan), onnxruntime, mediapipe, OpenCV
+#   - llama.cpp (Vulkan) for GGUF models: llama-cli, llama-server, ...
 #
 # Vulkan drivers come from a Mesa built from source (stage "mesa-build"), because
 # Ubuntu 22.04's Mesa 23.2 is too old for e.g. NVK on Maxwell GPUs: RADV (AMD),
@@ -10,13 +11,17 @@
 #
 # Built nightly by .github/workflows/build.yml.
 
+# Shared by the mesa-build and llama-build stages.
+ARG LLVM_VERSION=19
+ARG VULKAN_SDK_REF=vulkan-sdk-1.4.363.0
+
 # ---------------------------------------------------------------------------
 # Mesa, Vulkan drivers only (no OpenGL), installed into /staging
 # ---------------------------------------------------------------------------
 FROM docker.io/library/ubuntu:22.04 AS mesa-build
 
 ARG MESA_VERSION=26.2.4
-ARG LLVM_VERSION=19
+ARG LLVM_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -83,7 +88,7 @@ RUN curl -fsSL https://archive.mesa3d.org/mesa-$MESA_VERSION.tar.xz | tar -xJ -C
 
 # Jammy's Vulkan loader (1.3.204) predates VK_EXT_layer_settings, which Mesa's
 # layers advertise, so vulkaninfo fails on it; ship a current loader + vulkaninfo.
-ARG VULKAN_SDK_REF=vulkan-sdk-1.4.363.0
+ARG VULKAN_SDK_REF
 RUN git clone --depth 1 --branch "$VULKAN_SDK_REF" https://github.com/KhronosGroup/Vulkan-Loader /opt/vulkan-loader \
     && git clone --depth 1 --branch "$VULKAN_SDK_REF" https://github.com/KhronosGroup/Vulkan-Tools /opt/vulkan-tools \
     && cmake -S /opt/vulkan-loader -B /opt/vulkan-loader/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -96,6 +101,47 @@ RUN git clone --depth 1 --branch "$VULKAN_SDK_REF" https://github.com/KhronosGro
     && cmake --build /opt/vulkan-tools/build \
     && DESTDIR=/staging cmake --install /opt/vulkan-tools/build \
     && rm -rf /opt/vulkan-loader /opt/vulkan-tools
+
+# ---------------------------------------------------------------------------
+# llama.cpp with the Vulkan backend, installed into /staging-llama
+# ---------------------------------------------------------------------------
+FROM mesa-build AS llama-build
+
+ARG LLVM_VERSION
+ARG VULKAN_SDK_REF
+ARG SHADERC_REF=v2026.4
+ARG LLAMA_CPP_REF=b11535
+
+# ggml-vulkan compiles its shaders with glslc and needs current Vulkan and
+# SPIRV headers; jammy has no glslc, so build shaderc and install the headers.
+# The Vulkan loader comes from this stage's /staging.
+RUN cp -a /staging/. / && ldconfig \
+    && apt-get update && apt-get install -y --no-install-recommends libssl-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && git clone --depth 1 --branch "$VULKAN_SDK_REF" https://github.com/KhronosGroup/Vulkan-Headers /opt/vulkan-headers \
+    && cmake -S /opt/vulkan-headers -B /opt/vulkan-headers/build -G Ninja -DCMAKE_INSTALL_PREFIX=/usr/local \
+    && cmake --install /opt/vulkan-headers/build \
+    && git clone --depth 1 --branch "$SHADERC_REF" https://github.com/google/shaderc /opt/shaderc \
+    && cd /opt/shaderc && python3 utils/git-sync-deps \
+    && cmake -S third_party/spirv-headers -B build-spirv-headers -G Ninja -DCMAKE_INSTALL_PREFIX=/usr/local \
+    && cmake --install build-spirv-headers \
+    && cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DSHADERC_SKIP_TESTS=ON -DSHADERC_SKIP_EXAMPLES=ON -DSHADERC_SKIP_COPYRIGHT_CHECK=ON \
+    && cmake --build build --target glslc_exe \
+    && install -m 755 build/glslc/glslc /usr/local/bin/glslc \
+    && rm -rf /opt/vulkan-headers /opt/shaderc
+
+# Clang, since GCC 11 lacks some of the ISA extensions the CPU variants use.
+# GGML_CPU_ALL_VARIANTS picks the best CPU kernels at runtime instead of
+# tuning for the build machine; OpenMP off so the runtime needs no libomp.
+RUN git clone --depth 1 --branch "$LLAMA_CPP_REF" https://github.com/ggml-org/llama.cpp /opt/llama.cpp \
+    && CC=clang-$LLVM_VERSION CXX=clang++-$LLVM_VERSION cmake -S /opt/llama.cpp -B /opt/llama.cpp/build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DGGML_VULKAN=ON -DGGML_NATIVE=OFF -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DGGML_OPENMP=OFF \
+        -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF \
+    && cmake --build /opt/llama.cpp/build \
+    && DESTDIR=/staging-llama cmake --install /opt/llama.cpp/build \
+    && rm -rf /opt/llama.cpp
 
 # ---------------------------------------------------------------------------
 # Final image
@@ -141,6 +187,7 @@ RUN pip3 install --no-cache-dir --timeout 600 \
 
 # Mesa Vulkan drivers (ICDs land in /usr/local/share/vulkan/icd.d, which the loader searches).
 COPY --from=mesa-build /staging/ /
+COPY --from=llama-build /staging-llama/ /
 RUN ldconfig
 
 # ROS + Unitree environment for every login shell in the box.
@@ -149,4 +196,5 @@ COPY unitree-env.sh /etc/profile.d/unitree-env.sh
 RUN bash -c "source /etc/profile.d/unitree-env.sh && python3.10 -c '\
 import unitree_sdk2py, cyclonedds, rclpy, unitree_hg, cv2, mediapipe, ncnn, onnxruntime; \
 print(\"All imports OK, ncnn Vulkan devices:\", ncnn.get_gpu_count())'" \
-    && vulkaninfo --summary | grep -E "deviceName|driverInfo"
+    && vulkaninfo --summary | grep -E "deviceName|driverInfo" \
+    && llama-cli --version && llama-cli --list-devices

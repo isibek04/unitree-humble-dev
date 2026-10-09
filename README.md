@@ -16,6 +16,7 @@ Rebuilt nightly from scratch, so it picks up Ubuntu/ROS updates and the latest U
 | Unitree messages | `unitree_api`, `unitree_go`, `unitree_hg` built from [unitree_ros2](https://github.com/unitreerobotics/unitree_ros2) in `/opt/unitree_ros2` |
 | Unitree Python SDK | [unitree_sdk2_python](https://github.com/unitreerobotics/unitree_sdk2_python) in `/opt/unitree_sdk2_python` (with `cyclonedds==0.10.2`) |
 | Python | 3.10, `ncnn` (Vulkan), `onnxruntime`, `mediapipe`, OpenCV (no torch) |
+| LLMs | [llama.cpp](https://github.com/ggml-org/llama.cpp) with the Vulkan backend for GGUF models: `llama-cli`, `llama-server`, … in `/usr/local/bin` |
 | Tools | `tmux`, `git`, `colcon`, `ffmpeg`, PortAudio |
 
 Every login shell sources `/etc/profile.d/unitree-env.sh`: ROS 2 Humble, the Unitree messages, `RMW_IMPLEMENTATION=rmw_cyclonedds_cpp`, and CycloneDDS bound to `$ROBOT_IFACE` (default `enp3s0`). It also exports `UNITREE_ROS2_SETUP` pointing at itself, for scripts that would otherwise source `unitree_ros2/setup.sh`.
@@ -36,6 +37,14 @@ FROM ghcr.io/isibek04/unitree-humble-dev:latest
 RUN pip3 install --no-cache-dir -r requirements.txt
 ```
 
+**GGUF models** with llama.cpp (Vulkan GPU, CPU fallback):
+
+```bash
+llama-cli --list-devices
+llama-cli -m ~/models/model.gguf -ngl 99
+llama-server -m ~/models/model.gguf -ngl 99 --port 8080   # OpenAI-compatible API
+```
+
 Non-login shells (e.g. `docker run ... cmd`) don't read `/etc/profile.d`; use `bash -lc 'cmd'` or source `/etc/profile.d/unitree-env.sh` in your entrypoint.
 
 ## Building locally
@@ -52,6 +61,7 @@ The image redistributes third-party software unmodified under its own licenses, 
 - [unitree_ros2](https://github.com/unitreerobotics/unitree_ros2), [unitree_sdk2_python](https://github.com/unitreerobotics/unitree_sdk2_python): BSD-3-Clause (license files in `/opt/unitree_*`)
 - [Eclipse Cyclone DDS](https://github.com/eclipse-cyclonedds/cyclonedds-python): EPL-2.0 / EDL-1.0
 - [ncnn](https://github.com/Tencent/ncnn): BSD-3-Clause; [ONNX Runtime](https://github.com/microsoft/onnxruntime): MIT
+- [llama.cpp](https://github.com/ggml-org/llama.cpp): MIT
 - [MediaPipe](https://github.com/google-ai-edge/mediapipe), [OpenCV](https://github.com/opencv/opencv-python): Apache-2.0
 
 Python package license texts are in each package's `*.dist-info` directory under `/usr/local/lib/python3.10/dist-packages`.
