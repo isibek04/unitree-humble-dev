@@ -4,6 +4,7 @@
 #   - Unitree Python SDK (unitree_sdk2py, cyclonedds 0.10.2)
 #   - Inference only (no torch): ncnn (Vulkan), onnxruntime, mediapipe, OpenCV
 #   - llama.cpp (Vulkan) for GGUF models: llama-cli, llama-server, ...
+#   - unitree_mujoco simulator and the C++ unitree_sdk2 (/opt/unitree_robotics)
 #
 # Vulkan drivers come from a Mesa built from source (stage "mesa-build"), because
 # Ubuntu 22.04's Mesa 23.2 is too old for e.g. NVK on Maxwell GPUs: RADV (AMD),
@@ -144,6 +145,48 @@ RUN git clone --depth 1 --branch "$LLAMA_CPP_REF" https://github.com/ggml-org/ll
     && rm -rf /opt/llama.cpp
 
 # ---------------------------------------------------------------------------
+# unitree_mujoco simulator (C++), on the C++ unitree_sdk2 and a MuJoCo release
+# ---------------------------------------------------------------------------
+FROM docker.io/library/ubuntu:22.04 AS sim-build
+
+ARG UNITREE_SDK2_REF=main
+ARG UNITREE_MUJOCO_REF=main
+ARG MUJOCO_VERSION=3.3.6
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl git build-essential cmake \
+        libyaml-cpp-dev libboost-program-options-dev libfmt-dev libglfw3-dev libeigen3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# unitree_sdk2 goes to /opt/unitree_robotics, where unitree_mujoco and Unitree's
+# C++ examples look for it; it brings its own CycloneDDS (libddsc/libddscxx).
+RUN git clone --depth 1 --branch "$UNITREE_SDK2_REF" https://github.com/unitreerobotics/unitree_sdk2 /tmp/unitree_sdk2 \
+    && cmake -S /tmp/unitree_sdk2 -B /tmp/unitree_sdk2/build -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_EXAMPLES=OFF -DCMAKE_INSTALL_PREFIX=/opt/unitree_robotics \
+    && cmake --build /tmp/unitree_sdk2/build --target install \
+    && cp /tmp/unitree_sdk2/LICENSE /opt/unitree_robotics/ \
+    && rm -rf /tmp/unitree_sdk2
+
+# The simulator finds config.yaml in the parent of its binary's directory and
+# the robot models in ../unitree_robots, so the binary goes to simulate/bin with
+# MuJoCo in simulate/lib. RPATH (not RUNPATH) so ROS's LD_LIBRARY_PATH can't
+# swap in its own libddsc.
+RUN git clone --depth 1 --branch "$UNITREE_MUJOCO_REF" https://github.com/unitreerobotics/unitree_mujoco /opt/unitree_mujoco \
+    && curl -fsSL https://github.com/google-deepmind/mujoco/releases/download/$MUJOCO_VERSION/mujoco-$MUJOCO_VERSION-linux-$(uname -m).tar.gz \
+        | tar -xz -C /opt \
+    && cd /opt/unitree_mujoco/simulate \
+    && ln -s /opt/mujoco-$MUJOCO_VERSION mujoco \
+    && cmake -S . -B /tmp/sim-build -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_EXE_LINKER_FLAGS=-Wl,--disable-new-dtags \
+        -DCMAKE_BUILD_RPATH='$ORIGIN/../lib;/opt/unitree_robotics/lib' \
+    && cmake --build /tmp/sim-build --target unitree_mujoco -j"$(nproc)" \
+    && install -D -m 755 /tmp/sim-build/unitree_mujoco bin/unitree_mujoco \
+    && cp -a mujoco/bin/mujoco_plugin bin/ \
+    && mkdir lib && cp -a mujoco/lib/libmujoco.so* mujoco/THIRD_PARTY_NOTICES lib/ \
+    && rm -rf mujoco /tmp/sim-build /opt/mujoco-$MUJOCO_VERSION /opt/unitree_mujoco/.git
+
+# ---------------------------------------------------------------------------
 # Final image
 # ---------------------------------------------------------------------------
 FROM docker.io/library/ros:humble-ros-base-jammy AS runtime
@@ -163,6 +206,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libxcb-sync1 libxcb-randr0 libxcb-xfixes0 libxshmfence1 libx11-xcb1 libwayland-client0 libzstd1 libelf1 \
         libgl1 libglib2.0-0 libsm6 libxrender1 libxext6 libgles2-mesa libegl1 \
         portaudio19-dev libsndfile1 ffmpeg \
+        libglfw3 libyaml-cpp0.7 libboost-program-options1.74.0 libeigen3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Unitree ROS2 message packages (unitree_api, unitree_go, unitree_hg).
@@ -188,7 +232,10 @@ RUN pip3 install --no-cache-dir --timeout 600 \
 # Mesa Vulkan drivers (ICDs land in /usr/local/share/vulkan/icd.d, which the loader searches).
 COPY --from=mesa-build /staging/ /
 COPY --from=llama-build /staging-llama/ /
-RUN ldconfig
+COPY --from=sim-build /opt/unitree_robotics /opt/unitree_robotics
+COPY --from=sim-build /opt/unitree_mujoco /opt/unitree_mujoco
+RUN ldconfig \
+    && ln -s /opt/unitree_mujoco/simulate/bin/unitree_mujoco /usr/local/bin/unitree_mujoco
 
 # ROS + Unitree environment for every login shell in the box.
 COPY unitree-env.sh /etc/profile.d/unitree-env.sh
@@ -197,4 +244,5 @@ RUN bash -c "source /etc/profile.d/unitree-env.sh && python3.10 -c '\
 import unitree_sdk2py, cyclonedds, rclpy, unitree_hg, cv2, mediapipe, ncnn, onnxruntime; \
 print(\"All imports OK, ncnn Vulkan devices:\", ncnn.get_gpu_count())'" \
     && vulkaninfo --summary | grep -E "deviceName|driverInfo" \
-    && llama-cli --version && llama-cli --list-devices
+    && llama-cli --version && llama-cli --list-devices \
+    && unitree_mujoco --help

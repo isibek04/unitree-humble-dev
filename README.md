@@ -16,6 +16,8 @@ Rebuilt nightly from scratch, so it picks up Ubuntu/ROS updates and the latest U
 | Unitree messages | `unitree_api`, `unitree_go`, `unitree_hg` built from [unitree_ros2](https://github.com/unitreerobotics/unitree_ros2) in `/opt/unitree_ros2` |
 | Unitree Python SDK | [unitree_sdk2_python](https://github.com/unitreerobotics/unitree_sdk2_python) in `/opt/unitree_sdk2_python` (with `cyclonedds==0.10.2`) |
 | Python | 3.10, `ncnn` (Vulkan), `onnxruntime`, `mediapipe`, OpenCV (no torch) |
+| Simulator | [unitree_mujoco](https://github.com/unitreerobotics/unitree_mujoco) (C++, MuJoCo) in `/opt/unitree_mujoco`, as `unitree_mujoco` on the `PATH` |
+| Unitree C++ SDK | [unitree_sdk2](https://github.com/unitreerobotics/unitree_sdk2) in `/opt/unitree_robotics` |
 | LLMs | [llama.cpp](https://github.com/ggml-org/llama.cpp) with the Vulkan backend for GGUF models: `llama-cli`, `llama-server`, … in `/usr/local/bin` |
 | Tools | `tmux`, `git`, `colcon`, `ffmpeg`, PortAudio |
 
@@ -45,6 +47,22 @@ llama-cli -m ~/models/model.gguf -ngl 99
 llama-server -m ~/models/model.gguf -ngl 99 --port 8080   # OpenAI-compatible API
 ```
 
+**Simulator**: `unitree_mujoco` stands in for the robot over the same DDS topics (`rt/lowstate`, `rt/lowcmd`, …), on DDS domain 1 over the loopback interface, apart from a real robot on domain 0. Low-level control only: no sport mode or other built-in services.
+
+```bash
+unitree_mujoco -r go2                        # also go2w, b2, b2w, h1, g1, h2, as2
+unitree_mujoco -r g1 -s scene_29dof.xml      # scenes in /opt/unitree_mujoco/unitree_robots/<robot>/
+```
+
+Then point your code at it: `ChannelFactoryInitialize(1, "lo")` with the Python SDK, or for ROS 2:
+
+```bash
+export ROBOT_IFACE=lo ROS_DOMAIN_ID=1; source /etc/profile.d/unitree-env.sh
+ros2 topic echo /lowstate
+```
+
+Defaults (gamepad, elastic band for hanging humanoids) are in `/opt/unitree_mujoco/simulate/config.yaml`.
+
 Non-login shells (e.g. `docker run ... cmd`) don't read `/etc/profile.d`; use `bash -lc 'cmd'` or source `/etc/profile.d/unitree-env.sh` in your entrypoint.
 
 ## Building locally
@@ -58,7 +76,8 @@ podman build -t localhost/unitree-humble-dev .
 The image redistributes third-party software unmodified under its own licenses, including:
 
 - Ubuntu packages and ROS 2 Humble: various open-source licenses (Apache-2.0, BSD, GPL, …); see `/usr/share/doc/*/copyright` in the image
-- [unitree_ros2](https://github.com/unitreerobotics/unitree_ros2), [unitree_sdk2_python](https://github.com/unitreerobotics/unitree_sdk2_python): BSD-3-Clause (license files in `/opt/unitree_*`)
+- [unitree_ros2](https://github.com/unitreerobotics/unitree_ros2), [unitree_sdk2_python](https://github.com/unitreerobotics/unitree_sdk2_python), [unitree_sdk2](https://github.com/unitreerobotics/unitree_sdk2), [unitree_mujoco](https://github.com/unitreerobotics/unitree_mujoco): BSD-3-Clause (license files in `/opt/unitree_*`)
+- [MuJoCo](https://github.com/google-deepmind/mujoco): Apache-2.0 (notices in `/opt/unitree_mujoco/simulate/lib`)
 - [Eclipse Cyclone DDS](https://github.com/eclipse-cyclonedds/cyclonedds-python): EPL-2.0 / EDL-1.0
 - [ncnn](https://github.com/Tencent/ncnn): BSD-3-Clause; [ONNX Runtime](https://github.com/microsoft/onnxruntime): MIT
 - [llama.cpp](https://github.com/ggml-org/llama.cpp): MIT
