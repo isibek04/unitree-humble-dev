@@ -4,7 +4,7 @@
 #   - Unitree Python SDK (unitree_sdk2py, cyclonedds 0.10.2)
 #   - Inference only (no torch): ncnn (Vulkan), onnxruntime, mediapipe, OpenCV
 #   - llama.cpp (Vulkan) for GGUF models: llama-cli, llama-server, ...
-#   - unitree_mujoco simulator and the C++ unitree_sdk2 (/opt/unitree_robotics)
+#   - unitree_mujoco simulator (C++ and Python) and the C++ unitree_sdk2 (/opt/unitree_robotics)
 #
 # Vulkan drivers come from a Mesa built from source (stage "mesa-build"), because
 # Ubuntu 22.04's Mesa 23.2 is too old for e.g. NVK on Maxwell GPUs: RADV (AMD),
@@ -15,6 +15,8 @@
 # Shared by the mesa-build and llama-build stages.
 ARG LLVM_VERSION=19
 ARG VULKAN_SDK_REF=vulkan-sdk-1.4.363.0
+# Shared by sim-build (C++ simulator) and the final stage (mujoco Python package).
+ARG MUJOCO_VERSION=3.3.6
 
 # ---------------------------------------------------------------------------
 # Mesa, Vulkan drivers only (no OpenGL), installed into /staging
@@ -151,7 +153,7 @@ FROM docker.io/library/ubuntu:22.04 AS sim-build
 
 ARG UNITREE_SDK2_REF=main
 ARG UNITREE_MUJOCO_REF=main
-ARG MUJOCO_VERSION=3.3.6
+ARG MUJOCO_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -193,10 +195,12 @@ FROM docker.io/library/ros:humble-ros-base-jammy AS runtime
 
 ARG UNITREE_SDK2_PYTHON_REF=master
 ARG UNITREE_ROS2_REF=master
+ARG MUJOCO_VERSION
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         tmux \
+        vim-tiny \
         python3-pip \
         python3-colcon-common-extensions \
         ros-humble-rmw-cyclonedds-cpp \
@@ -226,8 +230,10 @@ RUN git clone --depth 1 --branch "$UNITREE_SDK2_PYTHON_REF" \
 
 # Inference only, no torch: ncnn runs on Vulkan, onnxruntime on CPU.
 # Train and export models elsewhere (e.g. `yolo export format=ncnn`).
+# mujoco (same release as the C++ simulator) and pygame (gamepad) are for
+# /opt/unitree_mujoco/simulate_python and MuJoCo scripting from Python.
 RUN pip3 install --no-cache-dir --timeout 600 \
-        ncnn onnxruntime mediapipe
+        ncnn onnxruntime mediapipe "mujoco==$MUJOCO_VERSION" pygame
 
 # Mesa Vulkan drivers (ICDs land in /usr/local/share/vulkan/icd.d, which the loader searches).
 COPY --from=mesa-build /staging/ /
@@ -241,7 +247,7 @@ RUN ldconfig \
 COPY unitree-env.sh /etc/profile.d/unitree-env.sh
 
 RUN bash -c "source /etc/profile.d/unitree-env.sh && python3.10 -c '\
-import unitree_sdk2py, cyclonedds, rclpy, unitree_hg, cv2, mediapipe, ncnn, onnxruntime; \
+import unitree_sdk2py, cyclonedds, rclpy, unitree_hg, cv2, mediapipe, ncnn, onnxruntime, mujoco, pygame; \
 print(\"All imports OK, ncnn Vulkan devices:\", ncnn.get_gpu_count())'" \
     && vulkaninfo --summary | grep -E "deviceName|driverInfo" \
     && llama-cli --version && llama-cli --list-devices \

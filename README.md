@@ -15,11 +15,11 @@ Rebuilt nightly from scratch, so it picks up Ubuntu/ROS updates and the latest U
 | ROS 2 | Humble (`ros:humble-ros-base-jammy`), `rmw_cyclonedds_cpp` |
 | Unitree messages | `unitree_api`, `unitree_go`, `unitree_hg` built from [unitree_ros2](https://github.com/unitreerobotics/unitree_ros2) in `/opt/unitree_ros2` |
 | Unitree Python SDK | [unitree_sdk2_python](https://github.com/unitreerobotics/unitree_sdk2_python) in `/opt/unitree_sdk2_python` (with `cyclonedds==0.10.2`) |
-| Python | 3.10, `ncnn` (Vulkan), `onnxruntime`, `mediapipe`, OpenCV (no torch) |
-| Simulator | [unitree_mujoco](https://github.com/unitreerobotics/unitree_mujoco) (C++, MuJoCo) in `/opt/unitree_mujoco`, as `unitree_mujoco` on the `PATH` |
+| Python | 3.10, `ncnn` (Vulkan), `onnxruntime`, `mediapipe`, OpenCV, `mujoco`, `pygame` (no torch) |
+| Simulator | [unitree_mujoco](https://github.com/unitreerobotics/unitree_mujoco) (MuJoCo) in `/opt/unitree_mujoco`: C++ as `unitree_mujoco` on the `PATH`, Python in `simulate_python/` |
 | Unitree C++ SDK | [unitree_sdk2](https://github.com/unitreerobotics/unitree_sdk2) in `/opt/unitree_robotics` |
 | LLMs | [llama.cpp](https://github.com/ggml-org/llama.cpp) with the Vulkan backend for GGUF models: `llama-cli`, `llama-server`, … in `/usr/local/bin` |
-| Tools | `tmux`, `git`, `colcon`, `ffmpeg`, PortAudio |
+| Tools | `tmux`, `vi`, `git`, `colcon`, `ffmpeg`, PortAudio |
 
 Every login shell sources `/etc/profile.d/unitree-env.sh`: ROS 2 Humble, the Unitree messages, `RMW_IMPLEMENTATION=rmw_cyclonedds_cpp`, and CycloneDDS bound to `$ROBOT_IFACE` (default `enp3s0`). It also exports `UNITREE_ROS2_SETUP` pointing at itself, for scripts that would otherwise source `unitree_ros2/setup.sh`.
 
@@ -62,6 +62,12 @@ ros2 topic echo /lowstate
 ```
 
 Defaults (gamepad, elastic band for hanging humanoids) are in `/opt/unitree_mujoco/simulate/config.yaml`.
+
+The Python version (on `unitree_sdk2py` and the `mujoco` package) is easier to modify, but its timing is less faithful than the C++ one. It takes no flags: robot, scene and the rest are in `config.py`, and it must run from its own directory:
+
+```bash
+cd /opt/unitree_mujoco/simulate_python && python3 unitree_mujoco.py
+```
 
 Non-login shells (e.g. `docker run ... cmd`) don't read `/etc/profile.d`; use `bash -lc 'cmd'` or source `/etc/profile.d/unitree-env.sh` in your entrypoint.
 
