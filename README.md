@@ -47,17 +47,17 @@ llama-cli -m ~/models/model.gguf -ngl 99
 llama-server -m ~/models/model.gguf -ngl 99 --port 8080   # OpenAI-compatible API
 ```
 
-**Simulator**: `unitree_mujoco` stands in for the robot over the same DDS topics (`rt/lowstate`, `rt/lowcmd`, …), on DDS domain 1 over the loopback interface, apart from a real robot on domain 0. Low-level control only: no sport mode or other built-in services.
+**Simulator**: `unitree_mujoco` stands in for the robot over the same DDS topics (`rt/lowstate`, `rt/lowcmd`, …), on DDS domain 0 over the loopback interface (set in `config.yaml`, and `DOMAIN_ID` in the Python simulator's `config.py`). Low-level control only: no sport mode or other built-in services.
 
 ```bash
 unitree_mujoco -r go2                        # also go2w, b2, b2w, h1, g1, h2, as2
 unitree_mujoco -r g1 -s scene_29dof.xml      # scenes in /opt/unitree_mujoco/unitree_robots/<robot>/
 ```
 
-Then point your code at it: `ChannelFactoryInitialize(1, "lo")` with the Python SDK, or for ROS 2:
+Then point your code at it: `ChannelFactoryInitialize(0, "lo")` with the Python SDK, or for ROS 2:
 
 ```bash
-export ROBOT_IFACE=lo ROS_DOMAIN_ID=1; source /etc/profile.d/unitree-env.sh
+export ROBOT_IFACE=lo ROS_DOMAIN_ID=0; source /etc/profile.d/unitree-env.sh
 ros2 topic echo /lowstate
 ```
 

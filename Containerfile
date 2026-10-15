@@ -178,6 +178,9 @@ RUN git clone --depth 1 --branch "$UNITREE_MUJOCO_REF" https://github.com/unitre
     && curl -fsSL https://github.com/google-deepmind/mujoco/releases/download/$MUJOCO_VERSION/mujoco-$MUJOCO_VERSION-linux-$(uname -m).tar.gz \
         | tar -xz -C /opt \
     && cd /opt/unitree_mujoco/simulate \
+    && sed -i 's/^domain_id:.*/domain_id: 0/' config.yaml && grep -qx 'domain_id: 0' config.yaml \
+    && sed -i 's/^use_joystick:.*/use_joystick: 1/' config.yaml && grep -qx 'use_joystick: 1' config.yaml \
+    && sed -i 's/^DOMAIN_ID *=.*/DOMAIN_ID = 0/' ../simulate_python/config.py && grep -qx 'DOMAIN_ID = 0' ../simulate_python/config.py \
     && ln -s /opt/mujoco-$MUJOCO_VERSION mujoco \
     && cmake -S . -B /tmp/sim-build -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_EXE_LINKER_FLAGS=-Wl,--disable-new-dtags \
