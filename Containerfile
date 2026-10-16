@@ -180,6 +180,7 @@ RUN git clone --depth 1 --branch "$UNITREE_MUJOCO_REF" https://github.com/unitre
     && cd /opt/unitree_mujoco/simulate \
     && sed -i 's/^domain_id:.*/domain_id: 0/' config.yaml && grep -qx 'domain_id: 0' config.yaml \
     && sed -i 's/^use_joystick:.*/use_joystick: 1/' config.yaml && grep -qx 'use_joystick: 1' config.yaml \
+    && sed -i 's/^enable_elastic_band:.*/enable_elastic_band: 1/' config.yaml && grep -qx 'enable_elastic_band: 1' config.yaml \
     && sed -i 's/^DOMAIN_ID *=.*/DOMAIN_ID = 0/' ../simulate_python/config.py && grep -qx 'DOMAIN_ID = 0' ../simulate_python/config.py \
     && ln -s /opt/mujoco-$MUJOCO_VERSION mujoco \
     && cmake -S . -B /tmp/sim-build -DCMAKE_BUILD_TYPE=Release \

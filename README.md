@@ -61,7 +61,7 @@ export ROBOT_IFACE=lo ROS_DOMAIN_ID=0; source /etc/profile.d/unitree-env.sh
 ros2 topic echo /lowstate
 ```
 
-Defaults (gamepad, elastic band for hanging humanoids) are in `/opt/unitree_mujoco/simulate/config.yaml`.
+Defaults (gamepad, elastic band for hanging humanoids) are in `/opt/unitree_mujoco/simulate/config.yaml`. The elastic band is enabled but starts detached: press `9` in the viewer to attach it, `7`/`8` (or the arrow keys) to shorten/lengthen it.
 
 The Python version (on `unitree_sdk2py` and the `mujoco` package) is easier to modify, but its timing is less faithful than the C++ one. It takes no flags: robot, scene and the rest are in `config.py`, and it must run from its own directory:
 
