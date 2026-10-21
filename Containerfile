@@ -2,6 +2,7 @@
 # (G1/H1/Go2), usable as a distrobox or as a base image:
 #   - Unitree ROS2 message packages (unitree_api, unitree_go, unitree_hg)
 #   - Unitree Python SDK (unitree_sdk2py, cyclonedds 0.10.2)
+#   - Nav2 and slam_toolbox
 #   - unitree_mujoco simulator (C++ and Python) and the C++ unitree_sdk2 (/opt/unitree_robotics)
 #
 # Vulkan drivers come from a Mesa built from source (stage "mesa-build"), because
@@ -208,6 +209,6 @@ COPY unitree-env.sh /etc/profile.d/unitree-env.sh
 
 RUN bash -c "source /etc/profile.d/unitree-env.sh && python3.10 -c '\
 import unitree_sdk2py, cyclonedds, rclpy, unitree_hg, mujoco, pygame; \
-print(\"All imports OK, ncnn Vulkan devices:\", ncnn.get_gpu_count())'" \
+print(\"All imports OK\")'" \
     && vulkaninfo --summary | grep -E "deviceName|driverInfo" \
     && unitree_mujoco --help

@@ -15,6 +15,7 @@ Rebuilt nightly from scratch, so it picks up Ubuntu/ROS updates and the latest U
 | ROS 2 | Humble (`ros:humble-ros-base-jammy`), `rmw_cyclonedds_cpp` |
 | Unitree messages | `unitree_api`, `unitree_go`, `unitree_hg` built from [unitree_ros2](https://github.com/unitreerobotics/unitree_ros2) in `/opt/unitree_ros2` |
 | Unitree Python SDK | [unitree_sdk2_python](https://github.com/unitreerobotics/unitree_sdk2_python) in `/opt/unitree_sdk2_python` (with `cyclonedds==0.10.2`) |
+| Navigation | Nav2 (`navigation2`, `nav2_bringup`) and `slam_toolbox` from the ROS 2 Humble apt packages |
 | Python | 3.10, `mujoco`, `pygame` |
 | Simulator | [unitree_mujoco](https://github.com/unitreerobotics/unitree_mujoco) (MuJoCo) in `/opt/unitree_mujoco`: C++ as `unitree_mujoco` on the `PATH`, Python in `simulate_python/` |
 | Unitree C++ SDK | [unitree_sdk2](https://github.com/unitreerobotics/unitree_sdk2) in `/opt/unitree_robotics` |
