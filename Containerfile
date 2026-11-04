@@ -5,115 +5,13 @@
 #   - Nav2 and slam_toolbox
 #   - unitree_mujoco simulator (C++ and Python) and the C++ unitree_sdk2 (/opt/unitree_robotics)
 #
-# Vulkan drivers come from a Mesa built from source (stage "mesa-build"), because
-# Ubuntu 22.04's Mesa 23.2 is too old for e.g. NVK on Maxwell GPUs: RADV (AMD),
-# ANV/HASVK (Intel), NVK (NVIDIA, open source) and lavapipe (CPU fallback).
-#
 # Multi-arch: linux/amd64 and linux/arm64 (e.g. the robots' Jetson Orin, on a JetPack 5
-# / Ubuntu 20.04 host with Docker). arm64 skips the Mesa build (stage "vulkan-arm64"):
-# none of its drivers cover Tegra GPUs, and Jetson CUDA needs NVIDIA's L4T images anyway.
+# / Ubuntu 20.04 host with Docker). No Vulkan drivers or CUDA: nothing in the image uses the GPU.
 #
 # Built nightly by .github/workflows/build.yml.
 
-# Set by BuildKit/buildah from --platform.
-ARG TARGETARCH
-ARG LLVM_VERSION=19
-ARG VULKAN_SDK_REF=vulkan-sdk-1.4.363.0
 # Shared by sim-build (C++ simulator) and the final stage (mujoco Python package).
 ARG MUJOCO_VERSION=3.3.6
-
-# ---------------------------------------------------------------------------
-# Mesa, Vulkan drivers only (no OpenGL), installed into /staging
-# ---------------------------------------------------------------------------
-FROM docker.io/library/ubuntu:22.04 AS mesa-build
-
-ARG MESA_VERSION=26.2.4
-ARG LLVM_VERSION
-
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl gnupg xz-utils git pkg-config bison flex \
-        build-essential python3-pip python3-dev \
-    && curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
-        | gpg --dearmor -o /usr/share/keyrings/llvm.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] https://apt.llvm.org/jammy/ llvm-toolchain-jammy-$LLVM_VERSION main" \
-        > /etc/apt/sources.list.d/llvm.list \
-    && apt-get update && apt-get install -y --no-install-recommends \
-        llvm-$LLVM_VERSION-dev clang-$LLVM_VERSION libclang-$LLVM_VERSION-dev libclang-cpp$LLVM_VERSION-dev \
-        libclc-$LLVM_VERSION-dev libpolly-$LLVM_VERSION-dev cmake ninja-build \
-        libdrm-dev libexpat1-dev libzstd-dev zlib1g-dev libelf-dev \
-        libx11-dev libxext-dev libxfixes-dev libxrandr-dev libxshmfence-dev libx11-xcb-dev \
-        libxcb-dri3-dev libxcb-present-dev libxcb-sync-dev libxcb-randr0-dev \
-        libxcb-shm0-dev libxcb-xfixes0-dev libxcb-glx0-dev libxcb-dri2-0-dev \
-        libwayland-dev wayland-protocols \
-    && rm -rf /var/lib/apt/lists/*
-
-# Mesa's CLC step needs SPIRV-Tools >= 2024.1 and a SPIRV-LLVM-Translator matching
-# the LLVM version; jammy has neither, so build them (static, build-time only).
-ARG SPIRV_REF=main
-RUN git clone --depth 1 --branch "$SPIRV_REF" https://github.com/KhronosGroup/SPIRV-Headers /opt/spirv-headers \
-    && git clone --depth 1 --branch "$SPIRV_REF" https://github.com/KhronosGroup/SPIRV-Tools /opt/spirv-tools \
-    && git clone --depth 1 --branch "llvm_release_${LLVM_VERSION}0" https://github.com/KhronosGroup/SPIRV-LLVM-Translator /opt/spirv-llvm-translator \
-    && cmake -S /opt/spirv-tools -B /opt/spirv-tools/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-        -DSPIRV-Headers_SOURCE_DIR=/opt/spirv-headers -DSPIRV_SKIP_TESTS=ON -DSPIRV_WERROR=OFF \
-        -DCMAKE_INSTALL_PREFIX=/usr/local \
-    && cmake --build /opt/spirv-tools/build --target install \
-    && cmake -S /opt/spirv-llvm-translator -B /opt/spirv-llvm-translator/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-        -DLLVM_DIR=/usr/lib/llvm-$LLVM_VERSION/lib/cmake/llvm \
-        -DLLVM_EXTERNAL_SPIRV_HEADERS_SOURCE_DIR=/opt/spirv-headers \
-        -DLLVM_SPIRV_INCLUDE_TESTS=OFF -DCMAKE_INSTALL_PREFIX=/usr/local \
-    && cmake --build /opt/spirv-llvm-translator/build --target install \
-    && rm -rf /opt/spirv-tools /opt/spirv-headers /opt/spirv-llvm-translator
-
-# Mesa also wants glslang >= 12.2 (jammy has 11.x).
-RUN git clone --depth 1 https://github.com/KhronosGroup/glslang /opt/glslang \
-    && cd /opt/glslang && python3 update_glslang_sources.py \
-    && cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
-        -DENABLE_GLSLANG_BINARIES=ON -DBUILD_TESTING=OFF \
-    && cmake --build build --target install \
-    && rm -rf /opt/glslang
-
-# Mesa needs meson >= 1.4, rustc >= 1.85 and bindgen >= 0.71.1 for NVK; jammy ships none of them.
-ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig \
-    LIBCLANG_PATH=/usr/lib/llvm-$LLVM_VERSION/lib \
-    PATH=/usr/lib/llvm-$LLVM_VERSION/bin:/root/.cargo/bin:$PATH
-RUN pip3 install --no-cache-dir meson ninja mako pyyaml packaging \
-    && curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal -c rustfmt \
-    && cargo install --locked bindgen-cli cbindgen
-
-# Build with clang: Mesa uses C23 enums with a fixed underlying type
-# (`enum x : uint8_t`), which jammy's GCC 11 can't parse.
-RUN curl -fsSL https://archive.mesa3d.org/mesa-$MESA_VERSION.tar.xz | tar -xJ -C /opt \
-    && cd /opt/mesa-$MESA_VERSION \
-    && CC=clang-$LLVM_VERSION CXX=clang++-$LLVM_VERSION meson setup build --prefix=/usr/local --buildtype=release \
-        -Dvulkan-drivers=amd,intel,intel_hasvk,nouveau,swrast \
-        -Dvulkan-layers=device-select \
-        -Dgallium-drivers= -Dopengl=false -Dgles1=disabled -Dgles2=disabled \
-        -Degl=disabled -Dgbm=disabled -Dglx=disabled -Dllvm=enabled -Dshared-llvm=disabled \
-        -Dplatforms=x11,wayland -Dallow-fallback-for=libdrm -Dlmsensors=disabled -Dvalgrind=disabled -Dlibunwind=disabled \
-    && meson install -C build --destdir /staging
-
-# Jammy's Vulkan loader (1.3.204) predates VK_EXT_layer_settings, which Mesa's
-# layers advertise, so vulkaninfo fails on it; ship a current loader + vulkaninfo.
-ARG VULKAN_SDK_REF
-RUN git clone --depth 1 --branch "$VULKAN_SDK_REF" https://github.com/KhronosGroup/Vulkan-Loader /opt/vulkan-loader \
-    && git clone --depth 1 --branch "$VULKAN_SDK_REF" https://github.com/KhronosGroup/Vulkan-Tools /opt/vulkan-tools \
-    && cmake -S /opt/vulkan-loader -B /opt/vulkan-loader/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-        -DUPDATE_DEPS=ON -DBUILD_TESTS=OFF -DCMAKE_INSTALL_PREFIX=/usr/local \
-    && cmake --build /opt/vulkan-loader/build \
-    && DESTDIR=/staging cmake --install /opt/vulkan-loader/build \
-    && cmake -S /opt/vulkan-tools -B /opt/vulkan-tools/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-        -DUPDATE_DEPS=ON -DBUILD_CUBE=OFF -DBUILD_ICD=OFF -DBUILD_VULKANINFO=ON -DBUILD_TESTS=OFF \
-        -DCMAKE_INSTALL_PREFIX=/usr/local \
-    && cmake --build /opt/vulkan-tools/build \
-    && DESTDIR=/staging cmake --install /opt/vulkan-tools/build \
-    && rm -rf /opt/vulkan-loader /opt/vulkan-tools
-
-# The final stage copies /staging from "vulkan": the Mesa build on amd64, nothing on arm64.
-FROM mesa-build AS vulkan-amd64
-FROM docker.io/library/ubuntu:22.04 AS vulkan-arm64
-RUN mkdir /staging
-FROM vulkan-${TARGETARCH} AS vulkan
 
 # ---------------------------------------------------------------------------
 # unitree_mujoco simulator (C++), on the C++ unitree_sdk2 and a MuJoCo release
@@ -169,6 +67,7 @@ FROM docker.io/library/ros:humble-ros-base-jammy AS runtime
 ARG UNITREE_SDK2_PYTHON_REF=master
 ARG UNITREE_ROS2_REF=master
 ARG MUJOCO_VERSION
+# Set by BuildKit/buildah from --platform.
 ARG TARGETARCH
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -183,12 +82,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-humble-nav2-bringup \
         ros-humble-slam-toolbox \
         libyaml-cpp-dev \
-        libdrm2 libdrm-amdgpu1 libdrm-nouveau2 libxcb-dri3-0 libxcb-present0 \
-        libxcb-sync1 libxcb-randr0 libxcb-xfixes0 libxshmfence1 libx11-xcb1 libwayland-client0 libzstd1 libelf1 \
         libgl1 libglib2.0-0 libsm6 libxrender1 libxext6 libgles2-mesa libegl1 \
         portaudio19-dev libsndfile1 ffmpeg \
         libglfw3 libyaml-cpp0.7 libboost-program-options1.74.0 libeigen3-dev \
-        $([ "$TARGETARCH" = amd64 ] && echo libdrm-intel1) \
     && rm -rf /var/lib/apt/lists/*
 
 # Unitree ROS2 message packages (unitree_api, unitree_go, unitree_hg).
@@ -224,8 +120,6 @@ RUN git clone --depth 1 --branch "$UNITREE_SDK2_PYTHON_REF" \
 RUN pip3 install --no-cache-dir --timeout 600 \
         "mujoco==$MUJOCO_VERSION" pygame
 
-# Mesa Vulkan drivers (ICDs land in /usr/local/share/vulkan/icd.d, which the loader searches); none on arm64.
-COPY --from=vulkan /staging/ /
 COPY --from=sim-build /opt/unitree_robotics /opt/unitree_robotics
 COPY --from=sim-build /opt/unitree_mujoco /opt/unitree_mujoco
 RUN ldconfig \
@@ -237,5 +131,4 @@ COPY unitree-env.sh /etc/profile.d/unitree-env.sh
 RUN bash -c "source /etc/profile.d/unitree-env.sh && python3.10 -c '\
 import unitree_sdk2py, cyclonedds, rclpy, unitree_hg, mujoco, pygame; \
 print(\"All imports OK\")'" \
-    && if [ "$TARGETARCH" = amd64 ]; then vulkaninfo --summary | grep -E "deviceName|driverInfo"; fi \
     && unitree_mujoco --help

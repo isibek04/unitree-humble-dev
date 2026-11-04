@@ -54,7 +54,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # The runner's default ~14 GB free is too tight for the ROS + Mesa layers.
+      # The runner's default ~14 GB free is too tight for the ROS layers.
       - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
@@ -87,7 +87,7 @@ jobs:
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
           pull: true
           # Nightly refreshes the final stage and the simulator (it tracks the
-          # Unitree repos); the Mesa build (pinned) stays cached.
+          # Unitree repos).
           no-cache: ${{ inputs.no-cache == true }}
           no-cache-filters: ${{ github.event_name == 'schedule' && 'runtime,sim-build' || '' }}
           cache-from: type=gha,scope=${{ matrix.arch }}
