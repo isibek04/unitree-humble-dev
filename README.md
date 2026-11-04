@@ -9,8 +9,8 @@ ghcr.io/isibek04/unitree-humble-dev:latest
 Rebuilt nightly from scratch, so it picks up Ubuntu/ROS updates and the latest Unitree commits.
 
 Multi-arch: `linux/amd64` and `linux/arm64`, so the same tag also runs on the robots' Jetson Orin
-(JetPack 5 is Ubuntu 20.04, but Docker only shares the kernel). The arm64 image has no Vulkan drivers
-(Mesa covers no Tegra GPU) and no CUDA; for GPU work on a Jetson, start from NVIDIA's L4T images instead.
+(JetPack 5 is Ubuntu 20.04, but Docker only shares the kernel). Neither arch has Vulkan drivers or CUDA
+(nothing in the image uses the GPU); for GPU work on a Jetson, start from NVIDIA's L4T images instead.
 On arm64, `cyclonedds` for the Python SDK is built from source against CycloneDDS 0.10.2 in `/opt/cyclonedds`.
 
 ## What's inside
