@@ -9,8 +9,14 @@
 # Ubuntu 22.04's Mesa 23.2 is too old for e.g. NVK on Maxwell GPUs: RADV (AMD),
 # ANV/HASVK (Intel), NVK (NVIDIA, open source) and lavapipe (CPU fallback).
 #
+# Multi-arch: linux/amd64 and linux/arm64 (e.g. the robots' Jetson Orin, on a JetPack 5
+# / Ubuntu 20.04 host with Docker). arm64 skips the Mesa build (stage "vulkan-arm64"):
+# none of its drivers cover Tegra GPUs, and Jetson CUDA needs NVIDIA's L4T images anyway.
+#
 # Built nightly by .github/workflows/build.yml.
 
+# Set by BuildKit/buildah from --platform.
+ARG TARGETARCH
 ARG LLVM_VERSION=19
 ARG VULKAN_SDK_REF=vulkan-sdk-1.4.363.0
 # Shared by sim-build (C++ simulator) and the final stage (mujoco Python package).
@@ -103,6 +109,12 @@ RUN git clone --depth 1 --branch "$VULKAN_SDK_REF" https://github.com/KhronosGro
     && DESTDIR=/staging cmake --install /opt/vulkan-tools/build \
     && rm -rf /opt/vulkan-loader /opt/vulkan-tools
 
+# The final stage copies /staging from "vulkan": the Mesa build on amd64, nothing on arm64.
+FROM mesa-build AS vulkan-amd64
+FROM docker.io/library/ubuntu:22.04 AS vulkan-arm64
+RUN mkdir /staging
+FROM vulkan-${TARGETARCH} AS vulkan
+
 # ---------------------------------------------------------------------------
 # unitree_mujoco simulator (C++), on the C++ unitree_sdk2 and a MuJoCo release
 # ---------------------------------------------------------------------------
@@ -157,12 +169,13 @@ FROM docker.io/library/ros:humble-ros-base-jammy AS runtime
 ARG UNITREE_SDK2_PYTHON_REF=master
 ARG UNITREE_ROS2_REF=master
 ARG MUJOCO_VERSION
+ARG TARGETARCH
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         tmux \
         vim-tiny \
-        python3-pip \
+        python3-pip python3-dev \
         python3-colcon-common-extensions \
         ros-humble-rmw-cyclonedds-cpp \
         ros-humble-rosidl-generator-dds-idl \
@@ -170,11 +183,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-humble-nav2-bringup \
         ros-humble-slam-toolbox \
         libyaml-cpp-dev \
-        libdrm2 libdrm-amdgpu1 libdrm-intel1 libdrm-nouveau2 libxcb-dri3-0 libxcb-present0 \
+        libdrm2 libdrm-amdgpu1 libdrm-nouveau2 libxcb-dri3-0 libxcb-present0 \
         libxcb-sync1 libxcb-randr0 libxcb-xfixes0 libxshmfence1 libx11-xcb1 libwayland-client0 libzstd1 libelf1 \
         libgl1 libglib2.0-0 libsm6 libxrender1 libxext6 libgles2-mesa libegl1 \
         portaudio19-dev libsndfile1 ffmpeg \
         libglfw3 libyaml-cpp0.7 libboost-program-options1.74.0 libeigen3-dev \
+        $([ "$TARGETARCH" = amd64 ] && echo libdrm-intel1) \
     && rm -rf /var/lib/apt/lists/*
 
 # Unitree ROS2 message packages (unitree_api, unitree_go, unitree_hg).
@@ -187,18 +201,31 @@ RUN git clone --depth 1 --branch "$UNITREE_ROS2_REF" \
         && colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release" \
     && rm -rf /opt/unitree_ros2/cyclonedds_ws/build /opt/unitree_ros2/cyclonedds_ws/log
 
+# cyclonedds 0.10.2 has no aarch64 wheel, so on arm64 pip builds it from source against
+# the C library of the same release (as unitree_sdk2_python's README does on Jetsons).
+# ROS's own libddsc stays first on LD_LIBRARY_PATH in sourced shells; same soname and ABI.
+ARG CYCLONEDDS_REF=0.10.2
+RUN if [ "$TARGETARCH" = arm64 ]; then \
+        git clone --depth 1 --branch "$CYCLONEDDS_REF" https://github.com/eclipse-cyclonedds/cyclonedds /tmp/cyclonedds \
+        && cmake -S /tmp/cyclonedds -B /tmp/cyclonedds/build -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_EXAMPLES=OFF -DBUILD_TESTING=OFF -DCMAKE_INSTALL_PREFIX=/opt/cyclonedds \
+        && cmake --build /tmp/cyclonedds/build --target install -j"$(nproc)" \
+        && echo /opt/cyclonedds/lib > /etc/ld.so.conf.d/cyclonedds.conf && ldconfig \
+        && rm -rf /tmp/cyclonedds; \
+    fi
+
 # Unitree Python SDK first, so its cyclonedds==0.10.2 pin wins.
 RUN git clone --depth 1 --branch "$UNITREE_SDK2_PYTHON_REF" \
         https://github.com/unitreerobotics/unitree_sdk2_python /opt/unitree_sdk2_python \
-    && pip3 install --no-cache-dir -e /opt/unitree_sdk2_python
+    && CYCLONEDDS_HOME=/opt/cyclonedds pip3 install --no-cache-dir -e /opt/unitree_sdk2_python
 
 # mujoco (same release as the C++ simulator) and pygame (gamepad) are for
 # /opt/unitree_mujoco/simulate_python and MuJoCo scripting from Python.
 RUN pip3 install --no-cache-dir --timeout 600 \
         "mujoco==$MUJOCO_VERSION" pygame
 
-# Mesa Vulkan drivers (ICDs land in /usr/local/share/vulkan/icd.d, which the loader searches).
-COPY --from=mesa-build /staging/ /
+# Mesa Vulkan drivers (ICDs land in /usr/local/share/vulkan/icd.d, which the loader searches); none on arm64.
+COPY --from=vulkan /staging/ /
 COPY --from=sim-build /opt/unitree_robotics /opt/unitree_robotics
 COPY --from=sim-build /opt/unitree_mujoco /opt/unitree_mujoco
 RUN ldconfig \
@@ -210,5 +237,5 @@ COPY unitree-env.sh /etc/profile.d/unitree-env.sh
 RUN bash -c "source /etc/profile.d/unitree-env.sh && python3.10 -c '\
 import unitree_sdk2py, cyclonedds, rclpy, unitree_hg, mujoco, pygame; \
 print(\"All imports OK\")'" \
-    && vulkaninfo --summary | grep -E "deviceName|driverInfo" \
+    && if [ "$TARGETARCH" = amd64 ]; then vulkaninfo --summary | grep -E "deviceName|driverInfo"; fi \
     && unitree_mujoco --help

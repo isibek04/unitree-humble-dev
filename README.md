@@ -8,6 +8,11 @@ ghcr.io/isibek04/unitree-humble-dev:latest
 
 Rebuilt nightly from scratch, so it picks up Ubuntu/ROS updates and the latest Unitree commits.
 
+Multi-arch: `linux/amd64` and `linux/arm64`, so the same tag also runs on the robots' Jetson Orin
+(JetPack 5 is Ubuntu 20.04, but Docker only shares the kernel). The arm64 image has no Vulkan drivers
+(Mesa covers no Tegra GPU) and no CUDA; for GPU work on a Jetson, start from NVIDIA's L4T images instead.
+On arm64, `cyclonedds` for the Python SDK is built from source against CycloneDDS 0.10.2 in `/opt/cyclonedds`.
+
 ## What's inside
 
 | | |
@@ -68,6 +73,9 @@ Non-login shells (e.g. `docker run ... cmd`) don't read `/etc/profile.d`; use `b
 ```bash
 podman build -t localhost/unitree-humble-dev .
 ```
+
+For the robot from an x86 machine, `--platform linux/arm64` works but runs under QEMU (`qemu-user-static`) and is slow;
+CI builds arm64 natively. To copy an image to a robot without internet: `podman save IMAGE | ssh user@robot docker load`.
 
 ## Licenses
 
